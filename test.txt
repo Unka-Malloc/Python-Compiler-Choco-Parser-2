@@ -1,0 +1,16 @@
+T:/WorkSpace/pyenvs/ct_cw2/Scripts/activate.ps1
+
+cd T:/WorkSpace/coursework-2-cxunka
+
+lit -v T:/WorkSpace/coursework-2-cxunka/tests/type-checking
+
+lit -v tests/type-checking/assign-and-list/
+lit -v tests/type-checking/and-or-not-is/
+lit -v tests/type-checking/index/
+lit -v tests/type-checking/control-flow/
+lit -v tests/type-checking/comparison/
+lit -v tests/type-checking/arithmetic/
+lit -v tests/type-checking/assign-complex/
+lit -v tests/type-checking/functions/
+
+choco-opt -p check-assign-target,name-analysis,type-checking tests/type-checking/functions/function-call/call_multiple_args_return_int.xdsl
