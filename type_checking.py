@@ -261,9 +261,9 @@ def check_stmt_or_def(o: LocalEnvironment, r: Type, op: Operation):
     if isinstance(op, choco_ast.VarDef):
         typed_var = op.typed_var.op
         assert isinstance(typed_var, choco_ast.TypedVar)
-        id = typed_var.var_name.data  #type: ignore
+        vname = typed_var.var_name.data  #type: ignore
         e1 = op.literal.op
-        return var_init_rule(o, r, id, e1)
+        return var_init_rule(o, r, vname, e1)
     elif isinstance(op, choco_ast.Assign):
         target_expr = op.target.op
         value_expr = op.value.op
@@ -390,14 +390,8 @@ def check_expr(o: LocalEnvironment, r: Type, op: Operation) -> Type:
         t = list_display_rule(o, r, op)
         # raise Exception("Support for choco_ast.ListExpr not implemented yet")
     elif isinstance(op, choco_ast.CallExpr):
-        func = op.func
-        args = op.args
-        type_hint = op.type_hint
 
-        for typed_var in args.ops:
-            check_expr(o, r, typed_var)
-
-        t = o[func.data].func_type.output
+        t = invoke_rule(o, r, op)
 
         # raise Exception("Support for choco_ast.CallExpr not implemented yet")
 
@@ -646,8 +640,17 @@ def multi_assign_stmt(o: LocalEnvironment, r: Type, op: Operation):
 
 # [INVOKE]
 # O, R |- f(e1, e2, ..., en): T0
-# def invoke_rule(o: LocalEnvironment, r: Type, ???) -> Type:
-#     ???
+def invoke_rule(o: LocalEnvironment, r: Type, op: Operation) -> Type:
+    func = op.func
+    args = op.args
+    type_hint = op.type_hint
+
+    for typed_var in args.ops:
+        check_expr(o, r, typed_var)
+
+    t = o[func.data].func_type.output
+
+    return t
 
 # [RETURN-e] rule
 # O, R |- return e
@@ -706,15 +709,15 @@ def func_def_rule(o: LocalEnvironment, r: Type, func_op: Operation):
 
     if len(func_body.ops) == 1:
         if isinstance(func_body.op, choco_ast.Return):
-            t = check_expr(o, r, func_body.op.value.op)
+            if func_body.op.value.ops:
+                for op in func_body.op.value.ops:
+                    t = check_expr(o, r, op)
         elif isinstance(func_body.op, choco_ast.Assign):
             typed_params = list(zip(o[func_name.data].params, o[func_name.data].func_type.inputs))
             for var_name, var_type in typed_params:
                 o[var_name] = var_type
             t1 = check_expr(o, r, func_body.op.target.op)
             t2 = check_expr(o, r, func_body.op.value.op)
-        else:
-            print(func_body.op)
     else:
         for op_expr in func_body.ops:
             if isinstance(op_expr, choco_ast.GlobalDecl):
