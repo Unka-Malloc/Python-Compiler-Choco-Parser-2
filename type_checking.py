@@ -298,13 +298,14 @@ def check_stmt_or_def(o: LocalEnvironment, r: Type, op: Operation):
         if isinstance(iter_expr, choco_ast.ListExpr):
             return for_list_rule(o, r, iter_name, iter_expr, body)
         else:
-            return for_str_rule(o, r, iter_expr, body)
+            return for_str_rule(o, r, iter_name, iter_expr, body)
         # raise Exception("Support for choco_ast.For not implemented yet")
     elif isinstance(op, choco_ast.GlobalDecl):
-        raise Exception("Support for choco_ast.GlobalDecl not implemented yet")
+        pass
+        # raise Exception("Support for choco_ast.GlobalDecl not implemented yet")
     elif isinstance(op, choco_ast.NonLocalDecl):
-        raise Exception(
-            "Support for choco_ast.NonLocalDecl not implemented yet")
+        pass
+        # raise Exception("Support for choco_ast.NonLocalDecl not implemented yet")
     elif isinstance(op, choco_ast.FuncDef):
         return func_def_rule(o, r, op)
         # raise Exception("Support for choco_ast.FuncDef not implemented yet")
@@ -322,9 +323,6 @@ def check_expr(o: LocalEnvironment, r: Type, op: Operation) -> Type:
             t = negate_rule(o, r, e)
         elif op_name == "not":
             t = not_rule(o, r, e)
-        else:
-            raise Exception(
-                "Support for some choco_ast.UnaryExpr not implemented yet")
     elif isinstance(op, choco_ast.BinaryExpr):
         op_name = op.op.data
         lhs = op.lhs.op
@@ -336,25 +334,31 @@ def check_expr(o: LocalEnvironment, r: Type, op: Operation) -> Type:
         elif op_name == 'or':
             t = or_rule(o, r, lhs, rhs)
         elif op_name in ['>', '<', '==', '!=','>=', '<=']:
-            tl = check_expr(o, r, lhs)
-            tr = check_expr(o, r, rhs)
-            if tl == str_type:
-                t = str_compare_rule(o, r, tr)
-            elif tl == int_type:
-                t = int_compare_rule(o, r, tr)
-            elif tl == bool_type:
-                t = bool_compare_rule(o, r, tr)
+            t1 = check_expr(o, r, lhs)
+            t2 = check_expr(o, r, rhs)
+            if t1 == str_type:
+                if op_name in ['==', '!=']:
+                    t = str_compare_rule(o, r, t2)
+                else:
+                    raise SemanticError()
+            elif t1 == int_type:
+                t = int_compare_rule(o, r, t2)
+            elif t1 == bool_type:
+                if op_name in ['==', '!=']:
+                    t = bool_compare_rule(o, r, t2)
+                else:
+                    raise SemanticError()
             else:
-                raise SemanticError("invalid object comarsion")
+                raise SemanticError()
         elif op_name in ['+', '-', '*', '//', '%']:
-            type_left = check_expr(o, r, lhs)
-            type_right = check_expr(o, r, rhs)
-            if type_left == str_type:
-                t = str_concat_rule(o, r, type_right)
-            elif type_left == int_type:
-                t = arith_rule(o, r, type_right)
-            elif isinstance(type_left, ListType):
-                t = list_concat_rule(o, r, type_left, type_right)
+            t1 = check_expr(o, r, lhs)
+            t2 = check_expr(o, r, rhs)
+            if t1 == str_type:
+                t = str_concat_rule(o, r, t2)
+            elif t1 == int_type:
+                t = arith_rule(o, r, t2)
+            elif isinstance(t1, ListType):
+                t = list_concat_rule(o, r, t1, t2)
         else:
             raise Exception("Support for choco_ast.BinaryExpr not implemented yet")
     elif isinstance(op, choco_ast.ExprName):
@@ -382,12 +386,11 @@ def check_expr(o: LocalEnvironment, r: Type, op: Operation) -> Type:
             else:
                 raise SemanticError(f"Found `{type(value.value)}' but expected {str_type}")
         else:
-            SemanticError(
-                f"Unkown {type(value)} where {ListType} or {str_type} expected")
+            SemanticError(f"Unkown {type(value)} where {ListType} or {str_type} expected")
 
         # raise Exception("Support for choco_ast.IndexExpr not implemented yet")
     elif isinstance(op, choco_ast.ListExpr):
-        t = list_display_rule(o, r, op)
+        t = list_display_rule(o, r, op.elems.blocks[0].ops)
         # raise Exception("Support for choco_ast.ListExpr not implemented yet")
     elif isinstance(op, choco_ast.CallExpr):
 
@@ -518,16 +521,16 @@ def bool_compare_rule(o: LocalEnvironment, r: Type, t: Type) -> Type:
 
 # [AND] rule
 # O, R |- e1 and e2 : bool
-def and_rule(o: LocalEnvironment, r: Type, lhs: Operation, rhs: Operation) -> Type:
-    check_type(check_expr(o, r, lhs), expected=bool_type)
-    check_type(check_expr(o, r, rhs), expected=bool_type)
+def and_rule(o: LocalEnvironment, r: Type, e1: Operation, e2: Operation) -> Type:
+    check_type(check_expr(o, r, e1), expected=bool_type)
+    check_type(check_expr(o, r, e2), expected=bool_type)
     return bool_type
 
 # [OR] rule
 # O, R |- e1 or e2 : bool
-def or_rule(o: LocalEnvironment, r: Type, lhs: Operation, rhs: Operation) -> Type:
-    check_type(check_expr(o, r, lhs), expected=bool_type)
-    check_type(check_expr(o, r, rhs), expected=bool_type)
+def or_rule(o: LocalEnvironment, r: Type, e1: Operation, e2: Operation) -> Type:
+    check_type(check_expr(o, r, e1), expected=bool_type)
+    check_type(check_expr(o, r, e2), expected=bool_type)
     return bool_type
 
 # [NOT] rule
@@ -565,10 +568,8 @@ def str_concat_rule(o: LocalEnvironment, r: Type, t: Type) -> Type:
 # [STR-SELECT]
 # O, R |- e1[e2] : str
 def str_select_rule(o: LocalEnvironment, r: Type, e1: Operation, e2: Operation) -> Type:
-    t1 = check_expr(o, r, e1)
-    t2 = check_expr(o, r, e2)
-    check_type(t1, expected=str_type)
-    check_type(t2, expected=int_type)
+    check_type(check_expr(o, r, e1), expected=str_type)
+    check_type(check_expr(o, r, e2), expected=int_type)
     return str_type
 
 # [IS]
@@ -586,16 +587,16 @@ def is_rule(o: LocalEnvironment, r: Type, e1: Operation, e2: Operation) -> Type:
 # [LIST-DISPLAY]
 # O, R |- [e1, e2, ..., en] : [T]
 def list_display_rule(o: LocalEnvironment, r: Type, op_list: List[Operation]) -> Type:
-    op = op_list.elems.blocks[0].ops
-
-    if not op:
-        return nil_rule(o, r)
+    if op_list:
+        t = check_expr(o, r, op_list[0])
+        if len(op_list) == 1:
+            return ListType(t)
+        else:
+            for op in op_list[1:]:
+                t = join(t, check_expr(o, r, op))
+            return ListType(t)
     else:
-        t = check_expr(o, r, op[0])
-        for e in op[1:]:
-            t1 = check_expr(o, r, e)
-            t = join(t, t1)
-        return ListType(t)
+        return nil_rule(o, r)
 
 # [NIL]
 # O, R |- [] : <Empty>
@@ -605,14 +606,13 @@ def nil_rule(o: LocalEnvironment, r: Type) -> Type:
 # [LIST-CONCAT]
 # O, R |- e1 + e2 : [T]
 def list_concat_rule(o: LocalEnvironment, r: Type, t1: Type, t2:Type) -> Type:
-    check_type(ListType(check_list_type(t1)), expected=ListType(check_list_type(t2)))
-    return ListType(check_list_type(t1))
+    t = join(check_list_type(t1), check_list_type(t2))
+    return ListType(t)
 
 # [LIST-SELECT]
 # O, R |- e1[e2] : T
 def list_select_rule(o: LocalEnvironment, r: Type, e1: Operation, e2: Operation) -> Type:
-    t1 = check_expr(o, r, e1)
-    t2 = check_list_type(t1)
+    t2 = check_list_type(check_expr(o, r, e1))
     check_type(check_expr(o, r, e2), expected=int_type)
     return t2
 
@@ -654,13 +654,13 @@ def invoke_rule(o: LocalEnvironment, r: Type, op: Operation) -> Type:
 
 # [RETURN-e] rule
 # O, R |- return e
-# def return_e_rule(o: LocalEnvironment, r: Type, ???):
-#     ???
+def return_e_rule(o: LocalEnvironment, r: Type, operation_type: Type, expected_type: Type):
+    check_assignment_compatibility(operation_type, expected_type)
 
 # [RETURN] rule
 # O, R |- return
-# def return_rule(o: LocalEnvironment, r: Type, ???):
-#     ???
+def return_rule(o: LocalEnvironment, r: Type, operation_type: Type, expected_type: Type):
+    check_assignment_compatibility(empty_type, expected_type)
 
 # [IF-ELSE]
 # O, R |- if e: b1 else: b2
@@ -685,17 +685,17 @@ def while_rule(o: LocalEnvironment, r: Type, e: Operation, b: List[Operation]):
 
 # [FOR-STR]
 # O, R |- for id in e: b
-def for_str_rule(o: LocalEnvironment, r: Type, e: Operation, b: List[Operation]):
-    t = check_expr(o, r, e)
-    check_type(t, expected=str_type)
+def for_str_rule(o: LocalEnvironment, r: Type, id: str, e: Operation, b: List[Operation]):
+    check_assignment_compatibility(str_type, o[id])
+    check_type(check_expr(o, r, e), expected=str_type)
     for op in b:
         check_stmt_or_def(o, r, op)
 
 # [FOR-LIST]
 # O, R |- for id in e: b
 def for_list_rule(o: LocalEnvironment, r: Type, id: str, e: Operation, b: List[Operation]):
-    t = check_expr(o, r, e)
-    check_type(t, expected=ListType(o[id]))
+    t = check_list_type(check_expr(o, r, e))
+    check_assignment_compatibility(o[id], t)
     for op in b:
         check_stmt_or_def(o, r, op)
 
@@ -707,24 +707,27 @@ def func_def_rule(o: LocalEnvironment, r: Type, func_op: Operation):
     return_type = func_op.return_type
     func_body = func_op.func_body
 
-    if len(func_body.ops) == 1:
-        if isinstance(func_body.op, choco_ast.Return):
-            if func_body.op.value.ops:
-                for op in func_body.op.value.ops:
-                    t = check_expr(o, r, op)
-        elif isinstance(func_body.op, choco_ast.Assign):
-            typed_params = list(zip(o[func_name.data].params, o[func_name.data].func_type.inputs))
-            for var_name, var_type in typed_params:
-                o[var_name] = var_type
-            t1 = check_expr(o, r, func_body.op.target.op)
-            t2 = check_expr(o, r, func_body.op.value.op)
-    else:
-        for op_expr in func_body.ops:
-            if isinstance(op_expr, choco_ast.GlobalDecl):
-                continue
-            elif isinstance(op_expr, choco_ast.Assign):
-                typed_params = list(zip(o[func_name.data].params, o[func_name.data].func_type.inputs))
-                for var_name, var_type in typed_params:
-                    o[var_name] = var_type
-                t1 = check_expr(o, r, op_expr.target.op)
-                t2 = check_expr(o, r, op_expr.value.op)
+    original_vars = [i for i in o.keys()]
+
+    typed_params = list(zip(o[func_name.data].params, o[func_name.data].func_type.inputs))
+    for var_name, var_type in typed_params:
+        o[var_name] = var_type
+
+    for op_expr in func_body.ops:
+        if isinstance(op_expr, choco_ast.Return):
+            if op_expr.value.ops:
+                t1 = check_expr(o, r, op_expr.value.op)
+                t2 = Type.from_op(return_type.op)
+
+                if return_type.op == empty_type:
+                    return_rule(o, r, t1, t2)
+                else:
+                    return_e_rule(o, r, t1, t2)
+
+        if isinstance(op_expr, choco_ast.Assign):
+            t1 = check_expr(o, r, op_expr.target.op)
+            t2 = check_expr(o, r, op_expr.value.op)
+
+    for var_name, var_type in typed_params:
+        if var_name not in original_vars:
+            del o[var_name]

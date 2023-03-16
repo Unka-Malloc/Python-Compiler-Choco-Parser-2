@@ -92,6 +92,181 @@ def warn_dead_code(_: MLContext, module: ModuleOp) -> ModuleOp:
     vars_env = {}
     vars_assign = {}
 
+    def visit_literal(node):
+        if isinstance(node.value, NoneAttr):
+            node.attributes["type_hint"] = choco_type.none_type
+            expr_env.append(node)
+
+        if isinstance(node.value, BoolAttr):
+            node.attributes["type_hint"] = choco_type.bool_type
+            expr_env.append(node)
+
+        if isinstance(node.value, IntegerAttr):
+            node.attributes["type_hint"] = choco_type.int_type
+            expr_env.append(node)
+
+        if isinstance(node.value, StringAttr):
+            node.attributes["type_hint"] = choco_type.str_type
+            expr_env.append(node)
+
+    def visit_var_def(node):
+        v_typed = node.typed_var.op
+        v_value = node.literal.op
+
+        vars_env[v_typed.var_name.data] = False
+
+    def visit_func_def(node):
+        f_name = node.func_name
+        f_params = node.params.ops
+        f_type = node.return_type.ops
+        f_body = node.func_body.ops
+
+        func_env[f_name] = False
+
+        func_domain_vars = {}
+
+        for typed_var in f_params:
+            func_domain_vars[typed_var.var_name.data] = False
+
+        for i in range(len(f_body)):
+            if isinstance(f_body[i], Return):
+                for op in f_body[i].value.ops:
+                    if isinstance(op, ExprName):
+                        if op.id.data in func_domain_vars.keys():
+                            func_domain_vars[op.id.data] = True
+
+                if i + 1 < len(f_body):
+                    if f_body[i + 1:]:
+                        print(f'[Warning] Dead code found: {UnreachableStatementsError()}')
+
+                break
+
+            if isinstance(f_body[i], Literal):
+                visit_literal(f_body[i])
+
+        if func_domain_vars:
+            for x in func_domain_vars:
+                if not func_domain_vars[x]:
+                    print(f'[Warning] Dead code found:', str(UnusedArgumentError(x)).replace('"', ''))
+
+    def visit_assign_expr(node):
+        target = s.target.op
+        value = s.value.op
+
+        if isinstance(target, ExprName):
+            if target.id.data in vars_assign.keys():
+                print(f'[Warning] Dead code found: The following store operation is unused:')
+                Printer().print_op(vars_assign[target.id.data])
+            else:
+                vars_assign[target.id.data] = s
+
+            if target.id.data in vars_env.keys():
+                vars_env[target.id.data] = True
+
+        if isinstance(value, CallExpr):
+            visit_call_expr(value)
+
+    def visit_call_expr(node):
+        if node.func in func_env.keys():
+            func_env[node.func] = True
+
+        for arg in node.args.ops:
+            if isinstance(arg, ExprName):
+                if arg.id.data in vars_assign.keys():
+                    del vars_assign[arg.id.data]
+
+            if isinstance(arg, BinaryExpr):
+                visit_binary_op(arg)
+
+    def visit_binary_op(node):
+        lhs = node.lhs
+        rhs = node.rhs
+        operator = node.op.data
+
+        if operator == '==':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value == rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == '!=':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value != rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == '>':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value > rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == '<':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value < rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == '>=':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value >= rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == '<=':
+            if len(lhs.ops) == 1 and len(rhs.ops) == 1:
+                if lhs.ops[0].value <= rhs.ops[0].value:
+                    return True
+                else:
+                    return False
+
+        if operator == "and":
+            for op in lhs.ops:
+                if isinstance(op, BinaryExpr):
+                    if not visit_binary_op(op):
+                        print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+                if isinstance(op, Literal):
+                    if not op.value.data:
+                        print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+        if operator == "or":
+            for op in lhs.ops:
+                if isinstance(op, BinaryExpr):
+                    visit_binary_op(op.value)
+
+                if isinstance(op, Literal):
+                    if op.value.data:
+                        print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+    def visit_if_expr(node):
+        cond = node.cond.op
+        then = node.then.ops
+        orelse = node.orelse.ops
+
+        if isinstance(cond, NoneAttr):
+            print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+        if isinstance(cond, BoolAttr):
+            if not cond.value.data:
+                print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+        if isinstance(cond, IntegerAttr):
+            if not cond.value.data:
+                print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+        if isinstance(cond, StringAttr):
+            if not cond.value.data:
+                print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+
+        if isinstance(cond, BinaryExpr):
+            visit_binary_op(cond)
+
     program = module.ops[0]
 
     defs = program.defs.ops
@@ -99,82 +274,29 @@ def warn_dead_code(_: MLContext, module: ModuleOp) -> ModuleOp:
 
     for d in defs:
         if isinstance(d, FuncDef):
-            f_name = d.func_name
-            f_params = d.params.ops
-            f_type = d.return_type.ops
-            f_body = d.func_body.ops
+            visit_func_def(d)
 
-            func_env[f_name] = False
-
-            internal_typed_variables = {}
-
-            for typed_var in f_params:
-                internal_typed_variables[typed_var.var_name.data] = False
-
-            for i in range(len(f_body)):
-                if isinstance(f_body[i], Return):
-                    for op in f_body[i].value.ops:
-                        if isinstance(op, ExprName):
-                            if op.id.data in internal_typed_variables.keys():
-                                internal_typed_variables[op.id.data] = True
-
-                    if i + 1 < len(f_body):
-                        if f_body[i + 1:]:
-                            print(f'[Warning] Dead code found: {UnreachableStatementsError()}')
-
-                if isinstance(f_body[i], Literal):
-                    if isinstance(f_body[i].value, IntegerAttr):
-                        f_body[i].attributes["type_hint"] = choco_type.int_type
-
-                        expr_env.append(f_body[i])
-
-            if internal_typed_variables:
-                for x in internal_typed_variables:
-                    if not internal_typed_variables[x]:
-                        print(f'[Warning] Dead code found:', str(UnusedArgumentError(x)).replace('"', ''))
-
-        elif isinstance(d, VarDef):
-            v_typed = d.typed_var.op
-            v_value = d.literal.op
-
-            vars_env[v_typed.var_name.data] = False
+        if isinstance(d, VarDef):
+            visit_var_def(d)
 
     for s in stmts:
+        # Unused Expression
+        if isinstance(s, Literal):
+            visit_literal(s)
+
+        if isinstance(s, BinaryExpr):
+            expr_env.append(s)
+
         if isinstance(s, CallExpr):
-            if s.func in func_env.keys():
-                func_env[s.func] = True
-
-            for arg in s.args.ops:
-                if isinstance(arg, BinaryExpr):
-                    lhs = arg.lhs
-                    rhs = arg.rhs
-                    operator = arg.op.data
-
-                    if operator == "and":
-                        for op in lhs.ops:
-                            if isinstance(op.value, NoneAttr):
-                                print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
-                            if isinstance(op.value, (BoolAttr, IntegerAttr, StringAttr)):
-                                if op.value.data in (False, 0, ""):
-                                    print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
+            visit_call_expr(s)
 
         if isinstance(s, Assign):
-            target = s.target.op
-            value = s.value.op
+            visit_assign_expr(s)
 
-            if isinstance(target, ExprName):
-                if target.id.data in vars_assign.keys():
-                    print(f'[Warning] Dead code found: The following store operation is unused:')
-                    Printer().print_op(vars_assign[target.id.data])
-                else:
-                    vars_assign[target.id.data] = s
+        if isinstance(s, If):
+            if not visit_if_expr(s):
+                print(f'[Warning] Dead code found: {UnreachableExpressionError()}')
 
-                if target.id.data in vars_env.keys():
-                    vars_env[target.id.data] = True
-
-            if isinstance(value, CallExpr):
-                if value.func in func_env.keys():
-                    func_env[value.func] = True
 
     if expr_env:
         print(f'[Warning] Dead code found: The following expression is unused:')
@@ -182,13 +304,18 @@ def warn_dead_code(_: MLContext, module: ModuleOp) -> ModuleOp:
             Printer().print_op(e)
 
     if func_env:
-        for f_name in func_env.keys():
-            if not func_env[f_name]:
-                print(f'[Warning] Dead code found:', str(UnusedFunctionError(f_name)).replace('"', ''))
+        for f in func_env.keys():
+            if not func_env[f]:
+                print(f'[Warning] Dead code found:', str(UnusedFunctionError(f)).replace('"', ''))
 
     if vars_env:
-        for v_name in vars_env.keys():
-            if not vars_env[v_name]:
-                print(f'[Warning] Dead code found:', str(UnusedVariableError(v_name)).replace('"', ''))
+        for v in vars_env.keys():
+            if not vars_env[v]:
+                print(f'[Warning] Dead code found:', str(UnusedVariableError(v)).replace('"', ''))
+
+    if vars_assign:
+        print(f'[Warning] Dead code found: The following store operation is unused: ')
+        for k in vars_assign.keys():
+            Printer().print_op(vars_assign[k])
 
     return module
